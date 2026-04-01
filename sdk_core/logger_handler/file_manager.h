@@ -29,7 +29,6 @@
 #include <vector>
 #include <map>
 #include <cstdint>
-
 namespace livox {
 namespace lidar {
 
