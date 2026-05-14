@@ -3,7 +3,8 @@ project(livox_sdk2)
 
 # Find ROS 2 ament packages
 find_package(ament_cmake REQUIRED)
-
+find_package(spdlog REQUIRED)
+find_package(fmt REQUIRED)
 set(CMAKE_CXX_STANDARD 11)
 message(STATUS "Main project directory: ${PROJECT_SOURCE_DIR}")
 
@@ -52,7 +53,15 @@ target_compile_options(${SDK_LIBRARY_STATIC}
 target_compile_options(${SDK_LIBRARY_SHARED}
     PRIVATE $<$<CXX_COMPILER_ID:GNU>:-Wall>
 )
+target_link_libraries(${SDK_LIBRARY_STATIC}
+  spdlog::spdlog
+  fmt::fmt
+)
 
+target_link_libraries(${SDK_LIBRARY_SHARED}
+  spdlog::spdlog
+  fmt::fmt
+)
 # Include directories
 set(LIVOX_PUBLIC_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/include)
 set(LIVOX_PRIVATE_INCLUDE_DIR
@@ -145,6 +154,6 @@ install(FILES ${LIVOX_API_HEADER}
 # Export include directories and libraries for ament
 ament_export_include_directories(include/${PROJECT_NAME})
 ament_export_libraries(${SDK_LIBRARY_STATIC} ${SDK_LIBRARY_SHARED})
-
+ament_export_dependencies(spdlog fmt)
 # Required for ROS 2 packages
 ament_package()
