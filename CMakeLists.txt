@@ -1,78 +1,125 @@
-cmake_minimum_required(VERSION 3.5...3.27)
+# Copyright(c) 2020 livoxtech limited.
 
-project(livox_sdk2)
+cmake_minimum_required(VERSION 3.5)
+project(livox_ros_driver2)
 
-# Set C++ standard
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-# Find dependencies
-find_package(ament_cmake REQUIRED)
-find_package(Threads REQUIRED)
-
-# Compiler flags
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    add_compile_options(-Wno-c++20-compat)
+# Default to C99
+if(NOT CMAKE_C_STANDARD)
+  set(CMAKE_C_STANDARD 99)
 endif()
 
-message(STATUS "main project dir: " ${PROJECT_SOURCE_DIR})
-
-if (CMAKE_CROSSCOMPILING)
-    set(THREADS_PTHREAD_ARG
-        "PLEASE_FILL_OUT-FAILED_TO_RUN"
-        CACHE STRING "Result from TRY_RUN" FORCE)
+# Default to C++14
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 14)
 endif()
 
-if (UNIX)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
-endif(UNIX)
+list(INSERT CMAKE_MODULE_PATH 0 "${PROJECT_SOURCE_DIR}/cmake/modules")
 
-# Collect all source files from sdk_core
-file(GLOB_RECURSE SDK_CORE_SOURCES
-    "sdk_core/*.cpp"
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
+endif()
+
+# Printf version info
+include(cmake/version.cmake)
+project(${PROJECT_NAME} VERSION ${LIVOX_ROS_DRIVER2_VERSION} LANGUAGES CXX)
+message(STATUS "${PROJECT_NAME} version: ${LIVOX_ROS_DRIVER2_VERSION}")
+
+#---------------------------------------------------------------------------------------
+# Add ROS Version MACRO
+#---------------------------------------------------------------------------------------
+add_definitions(-DBUILDING_ROS2)
+
+# find dependencies
+find_package(ament_cmake_auto REQUIRED)
+ament_auto_find_build_dependencies()
+find_package(PCL REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(builtin_interfaces REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(livox_sdk2 REQUIRED)
+find_package(spdlog REQUIRED)
+find_package(fmt REQUIRED)
+# check apr
+find_package(PkgConfig)
+pkg_check_modules(APR apr-1)
+if (APR_FOUND)
+  message(${APR_INCLUDE_DIRS})
+  message(${APR_LIBRARIES})
+endif (APR_FOUND)
+
+# generate custom msg headers
+set(LIVOX_INTERFACES livox_interfaces2)
+rosidl_generate_interfaces(${LIVOX_INTERFACES}
+  "msg/CustomPoint.msg"
+  "msg/CustomMsg.msg"
+  DEPENDENCIES builtin_interfaces std_msgs
+  LIBRARY_NAME ${PROJECT_NAME}
 )
 
-# Create the main library
-add_library(livox_lidar_sdk_shared SHARED ${SDK_CORE_SOURCES})
+## PCL library
+link_directories(${PCL_LIBRARY_DIRS})
+add_definitions(${PCL_DEFINITIONS})
 
-# Include directories
-target_include_directories(livox_lidar_sdk_shared PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/sdk_core>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/3rdparty>
-    $<INSTALL_INTERFACE:include>
+# livox ros2 driver target
+ament_auto_add_library(${PROJECT_NAME} SHARED
+  src/livox_ros_driver2.cpp
+  src/lddc.cpp
+  src/driver_node.cpp
+  src/lds.cpp
+  src/lds_lidar.cpp
+
+  src/comm/comm.cpp
+  src/comm/ldq.cpp
+  src/comm/semaphore.cpp
+  src/comm/lidar_imu_data_queue.cpp
+  src/comm/cache_index.cpp
+  src/comm/pub_handler.cpp
+
+  src/parse_cfg_file/parse_cfg_file.cpp
+  src/parse_cfg_file/parse_livox_lidar_cfg.cpp
+
+  src/call_back/lidar_common_callback.cpp
+  src/call_back/livox_lidar_callback.cpp
 )
 
-# Link dependencies
-target_link_libraries(livox_lidar_sdk_shared
-    PUBLIC Threads::Threads
+# get include directories of custom msg headers
+rosidl_get_typesupport_target(cpp_typesupport_target
+${LIVOX_INTERFACES} "rosidl_typesupport_cpp")
+target_link_libraries(${PROJECT_NAME} "${cpp_typesupport_target}")
+
+# include file direcotry
+target_include_directories(${PROJECT_NAME} PUBLIC
+  ${PCL_INCLUDE_DIRS}
+  ${APR_INCLUDE_DIRS}
+  ${livox_sdk2_INCLUDE_DIRS}
+  ${LIVOX_INTERFACES_INCLUDE_DIRECTORIES}   # for custom msgs
+  3rdparty
+  src
 )
 
-# Install library
-install(TARGETS livox_lidar_sdk_shared
-    EXPORT livox_sdk2_targets
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
+# link libraries
+target_link_libraries(${PROJECT_NAME}
+  ${livox_sdk2_LIBRARIES}
+  ${LIVOX_INTERFACE_TARGET}
+  ${PPT_LIBRARY}
+  ${Boost_LIBRARY}
+  ${PCL_LIBRARIES}
+  ${APR_LIBRARIES}
+  spdlog::spdlog
+  fmt::fmt
 )
 
-# Install headers
-install(DIRECTORY include/
-    DESTINATION include
+rclcpp_components_register_node(${PROJECT_NAME}
+  PLUGIN "livox_ros::DriverNode"
+  EXECUTABLE ${PROJECT_NAME}_node
 )
 
-# Install cmake config files
-install(EXPORT livox_sdk2_targets
-    FILE livox_sdk2Targets.cmake
-    NAMESPACE livox_sdk2::
-    DESTINATION lib/cmake/livox_sdk2
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
+endif()
+
+ament_auto_package(INSTALL_TO_SHARE
+  config
+  launch
 )
-
-# Export for ament
-ament_export_targets(livox_sdk2_targets HAS_LIBRARY_TARGET)
-ament_export_libraries(livox_lidar_sdk_shared)
-ament_export_include_directories(include)
-
-ament_package()
-
