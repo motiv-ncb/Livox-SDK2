@@ -1,125 +1,159 @@
-# Copyright(c) 2020 livoxtech limited.
-
 cmake_minimum_required(VERSION 3.5)
-project(livox_ros_driver2)
+project(livox_sdk2)
 
-# Default to C99
-if(NOT CMAKE_C_STANDARD)
-  set(CMAKE_C_STANDARD 99)
-endif()
-
-# Default to C++14
-if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 14)
-endif()
-
-list(INSERT CMAKE_MODULE_PATH 0 "${PROJECT_SOURCE_DIR}/cmake/modules")
-
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
-endif()
-
-# Printf version info
-include(cmake/version.cmake)
-project(${PROJECT_NAME} VERSION ${LIVOX_ROS_DRIVER2_VERSION} LANGUAGES CXX)
-message(STATUS "${PROJECT_NAME} version: ${LIVOX_ROS_DRIVER2_VERSION}")
-
-#---------------------------------------------------------------------------------------
-# Add ROS Version MACRO
-#---------------------------------------------------------------------------------------
-add_definitions(-DBUILDING_ROS2)
-
-# find dependencies
-find_package(ament_cmake_auto REQUIRED)
-ament_auto_find_build_dependencies()
-find_package(PCL REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(builtin_interfaces REQUIRED)
-find_package(rosidl_default_generators REQUIRED)
-find_package(livox_sdk2 REQUIRED)
+# Find ROS 2 ament packages
+find_package(ament_cmake REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
-# check apr
-find_package(PkgConfig)
-pkg_check_modules(APR apr-1)
-if (APR_FOUND)
-  message(${APR_INCLUDE_DIRS})
-  message(${APR_LIBRARIES})
-endif (APR_FOUND)
+set(CMAKE_CXX_STANDARD 11)
+message(STATUS "Main project directory: ${PROJECT_SOURCE_DIR}")
 
-# generate custom msg headers
-set(LIVOX_INTERFACES livox_interfaces2)
-rosidl_generate_interfaces(${LIVOX_INTERFACES}
-  "msg/CustomPoint.msg"
-  "msg/CustomMsg.msg"
-  DEPENDENCIES builtin_interfaces std_msgs
-  LIBRARY_NAME ${PROJECT_NAME}
+# Handle cross-compiling
+if (CMAKE_CROSSCOMPILING)
+    set(THREADS_PTHREAD_ARG "PLEASE_FILL_OUT-FAILED_TO_RUN" CACHE STRING "Result from TRY_RUN" FORCE)
+endif()
+
+# Set threading flags for UNIX
+if (UNIX)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
+endif()
+
+# Library names
+set(SDK_LIBRARY_STATIC livox_lidar_sdk_static)
+set(SDK_LIBRARY_SHARED livox_lidar_sdk_shared)
+
+# Create static and shared libraries
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+add_library(${SDK_LIBRARY_STATIC} STATIC "")
+add_library(${SDK_LIBRARY_SHARED} SHARED "")
+
+# Version information
+set(LIVOX_SDK_VERSION_STRING "0.0.2")
+
+# Header files
+message(STATUS "Header files: ${PROJECT_SOURCE_DIR}/include")
+set(LIVOX_API_HEADER
+    ${PROJECT_SOURCE_DIR}/include/livox_lidar_def.h
+    ${PROJECT_SOURCE_DIR}/include/livox_lidar_api.h
+    ${PROJECT_SOURCE_DIR}/include/livox_lidar_cfg.h
 )
 
-## PCL library
-link_directories(${PCL_LIBRARY_DIRS})
-add_definitions(${PCL_DEFINITIONS})
+# Platform-specific options
+if (WIN32)
+    set(PLATFORM win)
+else()
+    set(PLATFORM unix)
+endif()
 
-# livox ros2 driver target
-ament_auto_add_library(${PROJECT_NAME} SHARED
-  src/livox_ros_driver2.cpp
-  src/lddc.cpp
-  src/driver_node.cpp
-  src/lds.cpp
-  src/lds_lidar.cpp
-
-  src/comm/comm.cpp
-  src/comm/ldq.cpp
-  src/comm/semaphore.cpp
-  src/comm/lidar_imu_data_queue.cpp
-  src/comm/cache_index.cpp
-  src/comm/pub_handler.cpp
-
-  src/parse_cfg_file/parse_cfg_file.cpp
-  src/parse_cfg_file/parse_livox_lidar_cfg.cpp
-
-  src/call_back/lidar_common_callback.cpp
-  src/call_back/livox_lidar_callback.cpp
+# Compiler-specific options
+target_compile_options(${SDK_LIBRARY_STATIC}
+    PRIVATE $<$<CXX_COMPILER_ID:GNU>:-Wall>
 )
 
-# get include directories of custom msg headers
-rosidl_get_typesupport_target(cpp_typesupport_target
-${LIVOX_INTERFACES} "rosidl_typesupport_cpp")
-target_link_libraries(${PROJECT_NAME} "${cpp_typesupport_target}")
-
-# include file direcotry
-target_include_directories(${PROJECT_NAME} PUBLIC
-  ${PCL_INCLUDE_DIRS}
-  ${APR_INCLUDE_DIRS}
-  ${livox_sdk2_INCLUDE_DIRS}
-  ${LIVOX_INTERFACES_INCLUDE_DIRECTORIES}   # for custom msgs
-  3rdparty
-  src
+target_compile_options(${SDK_LIBRARY_SHARED}
+    PRIVATE $<$<CXX_COMPILER_ID:GNU>:-Wall>
 )
-
-# link libraries
-target_link_libraries(${PROJECT_NAME}
-  ${livox_sdk2_LIBRARIES}
-  ${LIVOX_INTERFACE_TARGET}
-  ${PPT_LIBRARY}
-  ${Boost_LIBRARY}
-  ${PCL_LIBRARIES}
-  ${APR_LIBRARIES}
+target_link_libraries(${SDK_LIBRARY_STATIC}
   spdlog::spdlog
   fmt::fmt
 )
 
-rclcpp_components_register_node(${PROJECT_NAME}
-  PLUGIN "livox_ros::DriverNode"
-  EXECUTABLE ${PROJECT_NAME}_node
+target_link_libraries(${SDK_LIBRARY_SHARED}
+  spdlog::spdlog
+  fmt::fmt
+)
+# Include directories
+set(LIVOX_PUBLIC_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/include)
+set(LIVOX_PRIVATE_INCLUDE_DIR
+    ${PROJECT_SOURCE_DIR}/3rdparty
+    ${PROJECT_SOURCE_DIR}/sdk_core
 )
 
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  ament_lint_auto_find_test_dependencies()
-endif()
+target_include_directories(${SDK_LIBRARY_STATIC} PUBLIC ${LIVOX_PUBLIC_INCLUDE_DIR} PRIVATE ${LIVOX_PRIVATE_INCLUDE_DIR})
+target_include_directories(${SDK_LIBRARY_SHARED} PUBLIC ${LIVOX_PUBLIC_INCLUDE_DIR} PRIVATE ${LIVOX_PRIVATE_INCLUDE_DIR})
 
-ament_auto_package(INSTALL_TO_SHARE
-  config
-  launch
+set(MAIN_SOURCES
+        sdk_core/device_manager.cpp
+        sdk_core/livox_lidar_sdk.cpp
+        sdk_core/params_check.cpp
+        sdk_core/parse_cfg_file.cpp
+        sdk_core/upgrade_manager.cpp
+        )
+set(BASE_SOURCES
+        sdk_core/base/io_loop.cpp
+        sdk_core/base/thread_base.cpp
+        sdk_core/base/io_thread.cpp
+        sdk_core/base/logging.cpp
+        sdk_core/base/network/${PLATFORM}/network_util.cpp
+        sdk_core/base/multiple_io/multiple_io_base.cpp
+        sdk_core/base/multiple_io/multiple_io_epoll.cpp
+        sdk_core/base/multiple_io/multiple_io_poll.cpp
+        sdk_core/base/multiple_io/multiple_io_select.cpp
+        sdk_core/base/multiple_io/multiple_io_kqueue.cpp
+        sdk_core/base/wake_up/${PLATFORM}/wake_up_pipe.cpp
+        )
+set(COMM_SOURCES
+		sdk_core/comm/comm_port.cpp
+        sdk_core/comm/sdk_protocol.cpp
+        sdk_core/comm/generate_seq.cpp
+        )
+set(UPGRADE_SOURCES
+		sdk_core/upgrade_manager.cpp
+        sdk_core/upgrade/firmware.cpp
+        sdk_core/upgrade/livox_lidar_upgrader.cpp
+        )
+set(LOGGER_HANDLER_SOURCES
+		sdk_core/logger_handler/logger_manager.cpp
+        sdk_core/logger_handler/logger_handler.cpp
+        sdk_core/logger_handler/file_manager.cpp
+        )
+set(DATA_HANDLER_SOURCES
+		sdk_core/data_handler/data_handler.cpp
+        )
+set(COMMAND_HANDLER_SOURCES
+		sdk_core/command_handler/command_impl.cpp
+        sdk_core/command_handler/general_command_handler.cpp
+        sdk_core/command_handler/hap_command_handler.cpp
+        sdk_core/command_handler/mid360_command_handler.cpp
+        sdk_core/command_handler/build_request.cpp
+        sdk_core/command_handler/parse_lidar_state_info.cpp
+        )
+set(DEBUG_POINT_CLOUD_HANDLER_SOURCES
+		sdk_core/debug_point_cloud_handler/debug_point_cloud_manager.cpp
+        sdk_core/debug_point_cloud_handler/debug_point_cloud_handler.cpp
+        )
+
+set(LIVOX_SOURCES
+    ${PROJECT_SOURCE_DIR}/3rdparty/FastCRC/FastCRC_tables.h
+    ${PROJECT_SOURCE_DIR}/3rdparty/FastCRC/FastCRCsw.cpp
+    ${MAIN_SOURCES}
+    ${BASE_SOURCES}
+    ${COMM_SOURCES}
+    ${UPGRADE_SOURCES}
+    ${LOGGER_HANDLER_SOURCES}
+    ${DATA_HANDLER_SOURCES}
+    ${COMMAND_HANDLER_SOURCES}
+    ${DEBUG_POINT_CLOUD_HANDLER_SOURCES}
 )
+
+target_sources(${SDK_LIBRARY_STATIC} PRIVATE ${LIVOX_SOURCES})
+target_sources(${SDK_LIBRARY_SHARED} PRIVATE ${LIVOX_SOURCES})
+
+# Installation targets
+install(TARGETS ${SDK_LIBRARY_STATIC} ${SDK_LIBRARY_SHARED}
+    PUBLIC_HEADER DESTINATION include/${PROJECT_NAME}
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+)
+
+# Installation targets for header files
+install(FILES ${LIVOX_API_HEADER}
+    DESTINATION include/${PROJECT_NAME}
+)
+
+# Export include directories and libraries for ament
+ament_export_include_directories(include/${PROJECT_NAME})
+ament_export_libraries(${SDK_LIBRARY_STATIC} ${SDK_LIBRARY_SHARED})
+ament_export_dependencies(spdlog fmt)
+# Required for ROS 2 packages
+ament_package()
